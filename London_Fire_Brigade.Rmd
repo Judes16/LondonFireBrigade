@@ -1,0 +1,214 @@
+---
+title: "London_Fire_Brigade"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: console
+date: "2024-09-19"
+---
+
+
+```{r setup, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(kableExtra)
+library(emmeans)
+library(gridExtra)
+options(width=100)
+```
+
+Variable|Description
+--------|----------
+IncidentNumber | LFB unique identifier for the incident
+DateOfCall | Date the 999 call for the incident was received by Brigade Control
+TimeOfCall | Time the 999 call for the incident was received Brigade Control
+IncidentGroup | High level description of the incident; Fire, Special Service or False Alarm
+StopCodeDescription | Stop code is an LFB short description of the type of incident attended (see PickLists)
+SpecialServiceType | Special Services are emergencies other than Fire that the LFB attend. Special Service Type categorises these into 21 different services  (see PickLists)
+PropertyCategory | A high level group to describe where the incident took place (see PickLists)
+PropertyType | A more detailed description of where the incident took place (see PickLists)
+AddressQualifier | This describes where the incident happened in relation to the address recorded
+Postcode_full | The full postcode for the address recorded for the incident. This is withheld for incidents where the property category is Dwelling in consideration of Data Protection principles
+Postcode_district | The partial district postcode (eg SE1) for the address recorded for the incident.
+WardCode | The Ward Code for the incident address recorded
+WardName | The Ward Name for the incident address recorded
+BoroughCode | The Borough Code for the incident address recorded
+BoroughName | The Borough Code for the incident address recorded
+Easting_m | The map easting coordinate for the incident location (to the nearest meter). This is withheld for incidents where the property category is Dwelling
+Northing_m | The map northing coordinate for the incident location (to the nearest meter). This is withheld for incidents where the property category is Dwelling
+Easting_rounded | The map easting representing the  centre of a 100x100m area where the incident occurred. This is used to provide granular information about the location of dwelling incidents but without making any singular incident uniquely identifiable.
+Northing_rounded | The map northing representing the  centre of a 100x100m area where the incident occurred. This is used to provide granular information about the location of dwelling incidents but without making any singular incident uniquely identifiable.
+FRS | The name of the Fire & Rescue Service area where the incident occurred; either London or the name of the neighbouring brigade where incident happen 'over-the-border'
+IncidentStationGround | A description of the fire station area ("Ground") where the incident happened.
+FirstPumpArriving_AttendanceTime | The attendance time (in seconds) for the first fire engine to arrive after it has been mobilised from a fire station (or other location if it was mobile by Brigade Control at the time of the call). When fire crews arrive they record their attendance using an on-board computer (a Mobile Data Terminal). There will be occasions when the first crew to arrive fail to record this correctly (either as human error or a delay/failure in the communications). When this happens the time recorded may in fact be the second or third.
+FirstPumpArriving_DeployedFromStation | The fire station where the fire engine shown as being the first (the time in the above field) was sent from.
+SecondPumpArriving_AttendanceTime | The attendance time (in seconds) for the second fire engine to arrive after it has been mobilised
+SecondPumpArriving_DeployedFromStation | The fire station where the fire engine shown as being the second (the time in the above field) was sent from.
+NumStationsWithPumpsAttending | The number of fire stations where fire engines were sent to support the incident. For large incidents this will include any stations involved in supplying additional and/or relief fire crews.
+NumPumpsAttending | The total number of fire engines in attendance at the incident (excluding relief fire crews)
+Notional Cost (£) | An estimate of the cost of the incident response
+
+# Section 1
+
+
+```{r}
+data <- read.csv("London_Fire_data.csv",stringsAsFactors = T)
+names(data)[which(colnames(data)=="Notional.Cost....")] <- "Notional_Cost"
+```
+
+Note: I recognize that there is an outlier in the notional cost column with a value of 407817 that is much higher than the rest of the occurences, shown by the following plot
+
+```{r,warning=FALSE,echo=FALSE}
+ggplot(data, aes(FirstPumpArriving_AttendanceTime,Notional_Cost))+geom_point()
+```
+
+However, I chose not to exclude it from the data because I felt it important for it to be included in calculations like the sum. Although it affects the mean, I found that I cannot just exclude it from the rest of the calculations.
+
+```{r,results='hide', fig.show='hide',warning=FALSE}
+#Task1
+fire_totalcost <- sum(subset(data, IncidentGroup == "Fire")$Notional_Cost,na.rm = T)
+false_totalcost <- sum(subset(data, IncidentGroup == "False Alarm")$Notional_Cost,na.rm = T)
+fire_meancost <- mean(subset(data, IncidentGroup == "Fire")$Notional_Cost,na.rm = T)
+false_meancost <- mean(subset(data, IncidentGroup == "False Alarm")$Notional_Cost, na.rm = T)
+
+cost_df <- data.frame(c(format(fire_totalcost,big.mark = ",",scientific = F),format(round(fire_meancost,2),big.mark = ",",scientific = F)),c(format(false_totalcost,big.mark = ",",scientific = F),format(round(false_meancost,2),big.mark = ",",scientific = F)))
+
+colnames(cost_df) <- c("Fire","False Alarm")
+rownames(cost_df) <- c("Sum","Mean")
+
+kbl(cost_df,caption = "Table 1",align = "cc")  %>% kable_styling()
+```
+
+```{r,results='hide', fig.show='hide',warning=FALSE}
+#Task2
+ggplot(data,mapping = aes(FirstPumpArriving_AttendanceTime)) + geom_histogram(binwidth = 1)
+
+
+df = data.frame(c(data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="Fire"],data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="False Alarm"],data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="Special Service"]))
+
+names(df)[1] <- "Response_time"
+
+df$type <- c(data$IncidentGroup[data$IncidentGroup=="Fire"],data$IncidentGroup[data$IncidentGroup=="False Alarm"],data$IncidentGroup[data$IncidentGroup=="Special Service"])
+
+ggplot(df, aes(x = Response_time, fill = type)) + geom_histogram(alpha = 0.5, bins = 70, position = "identity")
+
+ggplot(df, aes(x = Response_time)) + geom_histogram(binwidth = 1) + facet_grid(type~.)
+
+cnt_fire_table <- table(df$type)[0:2]
+kbl(cnt_fire_table,caption = "Table 2",col.names = c("Variables","Occurences"))  %>% kable_styling()
+
+
+incident_mean_table <- data.frame(c(mean(data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="False Alarm"],na.rm = T),mean(data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="Fire"],na.rm = T),mean(data$FirstPumpArriving_AttendanceTime[data$IncidentGroup=="Special Service"],na.rm = T)))
+
+colnames(incident_mean_table) <- "mean_response_time"
+rownames(incident_mean_table) <- c("False Alarm","Fire","Special Service")
+
+kbl(incident_mean_table,caption = "Table 3") %>% kable_styling()
+```
+
+```{r,results='hide',fig.show='hide',warning=FALSE}
+#Task3
+count_special_service <- data.frame(summary(data$SpecialServiceType))
+
+mean_special_service <- data %>% group_by(SpecialServiceType) %>% summarise(avg_response_time = round(mean(FirstPumpArriving_AttendanceTime,na.rm=T),1))
+
+tenth_special_service <- data %>% group_by(SpecialServiceType) %>% summarise(avg_response_time = quantile(FirstPumpArriving_AttendanceTime,.10,na.rm=T))
+
+ninetieth_special_service <- data %>% group_by(SpecialServiceType) %>% summarise(avg_response_time = quantile(FirstPumpArriving_AttendanceTime,.90,na.rm=T))
+
+summary_special_service <- data.frame(c(count_special_service,mean_special_service[2],tenth_special_service[2],ninetieth_special_service[2]))
+
+rownames(summary_special_service) <- rownames(count_special_service)
+colnames(summary_special_service) <- c("Count","Mean","10th Percentile","90th Percentile")
+
+summary_special_service <- summary_special_service[-nrow(summary_special_service),]
+
+kbl(summary_special_service,caption = "Table 4",align = "cccc")  %>% kable_styling()
+```
+
+```{r,results='hide',fig.show='hide',warning=FALSE}
+#Task4
+greenwich.vs.ealing <- data %>% filter(IncGeo_BoroughName=="GREENWICH"|IncGeo_BoroughName=="EALING")
+
+greenwich.vs.ealing_summary <- greenwich.vs.ealing %>% group_by(IncGeo_BoroughName) %>% summarise(mean_resp_time = mean(FirstPumpArriving_AttendanceTime,na.rm=T),sd_resp_time=sd(FirstPumpArriving_AttendanceTime,na.rm = T),N_resp_time=n())
+
+greenwich.vs.ealing_summary %>% summarise(diff_resp_time=diff(mean_resp_time))
+
+ggplot(greenwich.vs.ealing,aes(FirstPumpArriving_AttendanceTime,..density..,fill=IncGeo_BoroughName))+geom_histogram(binwidth = 2,position = "identity", alpha = 0.5)
+
+ttest <- t.test(FirstPumpArriving_AttendanceTime~IncGeo_BoroughName,greenwich.vs.ealing)
+
+mean_resp_bystation <- lm(FirstPumpArriving_AttendanceTime~IncGeo_BoroughName,greenwich.vs.ealing)
+em_resp_bystation <- emmeans(mean_resp_bystation,~IncGeo_BoroughName)
+mean_resp_bystation_contrast <- confint(pairs(em_resp_bystation))
+
+grid.arrange(ggplot(summary(em_resp_bystation), aes(x=IncGeo_BoroughName, y=emmean, ymin=lower.CL, ymax=upper.CL)) + geom_point() + geom_linerange() + labs(y="Response_time", x="Area", subtitle="Error bars are 95% CIs", title="Response times of incidents") + ylim(300,330), ggplot(mean_resp_bystation_contrast, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + geom_point() + geom_linerange() + labs(y="Difference in response times", x="Contrast", subtitle="Error bars are 95% CIs", title="Difference in response times of incidents") + ylim(0,10) + geom_hline(yintercept=0, lty=2), ncol=2)
+```
+
+---
+
+# Section 2
+
+This report is an analysis of London fires data set as requested by a panel of Fire service managers and local politicians. There were some incidences of missing data for some columns in the data, specifically, notional cost and response times for first vehicle to arrive. These missing values were removed only when used for calculations such as sums and means. The rows containing missing values were not all removed at the start due to the large number of missing values, making the data set too biased for calculations if all were removed from the start.
+
+We begin by displaying the sum and mean of all costs associated with responding to fire or false alarms.
+```{r, echo=FALSE}
+kbl(cost_df,caption = "Table 1",align = "cc")  %>% kable_styling()
+```
+This table shows that it is much more costly to respond to fire alarms than it is actual fires. However, the mean cost of responding to fires is much more than that of false alarms. This could be due to a higher number of false alarms than fires reported.
+
+```{r, echo=FALSE}
+kbl(cnt_fire_table,caption = "Table 2",col.names = c("Variables","Occurences"))  %>% kable_styling()
+```
+It appears that the hypothesis was right. This means that in reality, it costs more to respond to actual fires (shown by the higher mean cost of responding to fires), but due to a much hire number of false alarms, the total cost of responding to false alarms turned out to be higher.
+
+The distribution of response times is visualized below as requested.
+```{r, echo=FALSE}
+ggplot(data,mapping = aes(FirstPumpArriving_AttendanceTime)) + geom_histogram(binwidth = 1) + geom_vline(aes(xintercept=mean(FirstPumpArriving_AttendanceTime,na.rm = T)),color = "yellow",size=1)
+```
+This shows that the average response time was around 300 seconds (308.06 to be exact), and as we can see graphically, the bulk of the response times were between 100 and 500 seconds.
+
+
+Now to show a plot that will allow us to easily compare the distribution of response times. Two different plot are provided for preference. The first one includes all different response times, for ease of comparison. The second displays each response time in its own plot, for easier viewing of each on separately.
+```{r, echo=FALSE}
+ggplot(df, aes(x = Response_time, fill = type)) + geom_histogram(alpha = 0.5, bins = 70, position = "identity")
+```
+
+```{r, echo=FALSE}
+ggplot(df, aes(x = Response_time)) + geom_histogram(binwidth = 1) + facet_grid(type~.)
+```
+
+As we can see from the graphs above, all three incidences have a similar distribution, with the mean for all of them hovering around 300 as shown below.
+
+```{r, echo=FALSE}
+kbl(incident_mean_table,caption = "Table 3") %>% kable_styling()
+```
+
+Next we will show the mean, 10th, and 90th percentile of response times pertaining to each typ of incident under the "Special Service" incident type, as requested.
+
+```{r, echo=FALSE}
+kbl(summary_special_service,caption = "Table 4",align = "cccc")  %>% kable_styling()
+```
+
+As we can see from the table, the service with the highest mean and 90th percentile response times is the Spills and Leaks service (it woud also be the highest 10th percentile if we exclude water provision due to it only being 1 case as shown in the table under column "count"). This means that in almost all cases, responses to Spills and Leaks is the slowest out of all other incidences. This might be an indication that the spills and leaks incident is the least dangerous incident out of all of them (because of the delay in response times), but we do not have the data to confirm this. We also notice from the table that the "Removal of objects from people" incident has the lowest mean and 10th percentile response times, but 2nd to "Medical Incident" in the 90th percentile. These fast response rates can indicate that it takes the least effort and expertise for this incident, hence the lack of delay in response.
+
+```{r, echo=FALSE}
+ttest
+```
+
+The mean response time for Ealing is 5 minutes and 17 seconds. The mean response time for Greenwich is 5 minutes and 11 seconds. The mean response time is significantly larger for Ealing, Welch t(19303) = 2.85, p < .05, with a difference of 5 minutes and 33 seconds.
+
+```{r, echo=FALSE}
+mean_resp_bystation
+em_resp_bystation
+mean_resp_bystation_contrast
+
+grid.arrange(ggplot(summary(em_resp_bystation), aes(x=IncGeo_BoroughName, y=emmean, ymin=lower.CL, ymax=upper.CL)) + geom_point() + geom_linerange() + labs(y="Response_time", x="Area", subtitle="Error bars are 95% CIs", title="Response times of incidents") + ylim(300,330), ggplot(mean_resp_bystation_contrast, aes(x=contrast, y=estimate, ymin=lower.CL, ymax=upper.CL)) + geom_point() + geom_linerange() + labs(y="Difference in response times", x="Contrast", subtitle="Error bars are 95% CIs", title="Difference in response times of incidents") + ylim(0,10) + geom_hline(yintercept=0, lty=2), ncol=2)
+```
+The mean response time for Ealing is 5 minutes and 17 seconds (317 seconds), with a 95% confidence interval [314-320]. The mean response time for Greenwich is 5 minutes and 11 seconds (311 seconds), with a 95% confidence interval [309-314]. The difference in mean response times is 5.55 minutes (5 minutes and 33 seconds) between Ealing and Greenwich (meaning response time is 5 minutes and 33 seconds faster in Ealing), with 95% confidence interval [1.73-9.38]
+
+---
